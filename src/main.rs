@@ -132,6 +132,7 @@ struct TuringMachine {
     step_count: u64,
     status: RunStatus,
     timer_speed_ms: u32,
+    ui_font: HFONT,
     bold_font: HFONT,
 
     // Control handles
@@ -164,6 +165,7 @@ impl TuringMachine {
             step_count: 0,
             status: RunStatus::Idle,
             timer_speed_ms: 500,
+            ui_font: HFONT::default(),
             bold_font: HFONT::default(),
             h_listview: HWND::default(),
             h_edit_cur_state: HWND::default(),
@@ -333,6 +335,9 @@ unsafe extern "system" fn wndproc(
             let num_cells = 28;
             let start_x = 20;
 
+            // Select Segoe UI font into DC
+            let old_font = SelectObject(hdc, tm.ui_font);
+
             // State/step info text
             SetBkMode(hdc, TRANSPARENT);
             let info = format!(
@@ -399,6 +404,7 @@ unsafe extern "system" fn wndproc(
                 TextOutW(hdc, x + 4, y + cell_h + 2, &pos_w[..pos_w.len() - 1]);
             }
 
+            SelectObject(hdc, old_font);
             EndPaint(hwnd, &ps);
             return LRESULT(0);
         }
@@ -590,6 +596,9 @@ unsafe extern "system" fn wndproc(
         WM_DESTROY => {
             if !tm_ptr.is_null() {
                 let tm = &mut *tm_ptr;
+                if !tm.ui_font.is_invalid() {
+                    let _ = DeleteObject(tm.ui_font);
+                }
                 if !tm.bold_font.is_invalid() {
                     let _ = DeleteObject(tm.bold_font);
                 }
@@ -759,7 +768,14 @@ unsafe fn update_status(tm: &TuringMachine) {
 
 // ── Create child controls ───────────────────────────────────────────────────
 
+const WM_SETFONT: u32 = 0x0030;
+
+unsafe fn send_font(hwnd: HWND, font: HFONT) {
+    SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(0));
+}
+
 unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) {
+    let font = tm.ui_font;
     let lv_style = WINDOW_STYLE(
         WS_CHILD.0 | WS_VISIBLE.0 | WS_BORDER.0 | LVS_REPORT as u32 | LVS_SINGLESEL as u32
             | LVS_SHOWSELALWAYS as u32,
@@ -779,6 +795,8 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         hinst,
         None,
     );
+
+    send_font(tm.h_listview, font);
 
     // Enable grid lines and full-row select
     SendMessageW(
@@ -815,11 +833,11 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
     let ctrl_h = 24;
 
     // Labels
-    create_static(hwnd, hinst, "Cur State:", 10, editor_y, 80, label_h);
-    create_static(hwnd, hinst, "Read:", 170, editor_y, 50, label_h);
-    create_static(hwnd, hinst, "New State:", 300, editor_y, 80, label_h);
-    create_static(hwnd, hinst, "Write:", 460, editor_y, 50, label_h);
-    create_static(hwnd, hinst, "Dir:", 590, editor_y, 40, label_h);
+    create_static(hwnd, hinst, "Cur State:", 10, editor_y, 80, label_h, font);
+    create_static(hwnd, hinst, "Read:", 170, editor_y, 50, label_h, font);
+    create_static(hwnd, hinst, "New State:", 300, editor_y, 80, label_h, font);
+    create_static(hwnd, hinst, "Write:", 460, editor_y, 50, label_h, font);
+    create_static(hwnd, hinst, "Dir:", 590, editor_y, 40, label_h, font);
 
     let ctrl_y = editor_y + label_h + 2;
 
@@ -838,9 +856,10 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         hinst,
         None,
     );
+    send_font(tm.h_edit_cur_state, font);
 
     // Combo: Read symbol
-    tm.h_combo_read = create_combo(hwnd, hinst, 170, ctrl_y, 120, 100, ID_COMBO_READ);
+    tm.h_combo_read = create_combo(hwnd, hinst, 170, ctrl_y, 120, 100, ID_COMBO_READ, font);
     add_combo_items(tm.h_combo_read, &["0", "1", "_"]);
 
     // Edit: New State
@@ -858,28 +877,29 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         hinst,
         None,
     );
+    send_font(tm.h_edit_new_state, font);
 
     // Combo: Write symbol
-    tm.h_combo_write = create_combo(hwnd, hinst, 460, ctrl_y, 120, 100, ID_COMBO_WRITE);
+    tm.h_combo_write = create_combo(hwnd, hinst, 460, ctrl_y, 120, 100, ID_COMBO_WRITE, font);
     add_combo_items(tm.h_combo_write, &["0", "1", "_"]);
 
     // Combo: Direction
-    tm.h_combo_dir = create_combo(hwnd, hinst, 590, ctrl_y, 80, 100, ID_COMBO_DIR);
+    tm.h_combo_dir = create_combo(hwnd, hinst, 590, ctrl_y, 80, 100, ID_COMBO_DIR, font);
     add_combo_items(tm.h_combo_dir, &["L", "R"]);
 
     // Buttons: Add, Update, Delete
     let btn_y = ctrl_y + ctrl_h + 5;
-    create_button(hwnd, hinst, "Add", 10, btn_y, 80, 28, ID_BTN_ADD);
-    create_button(hwnd, hinst, "Update", 100, btn_y, 80, 28, ID_BTN_UPDATE);
-    create_button(hwnd, hinst, "Delete", 190, btn_y, 80, 28, ID_BTN_DELETE);
+    create_button(hwnd, hinst, "Add", 10, btn_y, 80, 28, ID_BTN_ADD, font);
+    create_button(hwnd, hinst, "Update", 100, btn_y, 80, 28, ID_BTN_UPDATE, font);
+    create_button(hwnd, hinst, "Delete", 190, btn_y, 80, 28, ID_BTN_DELETE, font);
 
     // ── Control Area (y=435..500) ──
     let ctrl_area_y = 440;
 
-    create_button(hwnd, hinst, "Step", 10, ctrl_area_y, 70, 30, ID_BTN_STEP);
-    create_button(hwnd, hinst, "Run", 90, ctrl_area_y, 70, 30, ID_BTN_RUN);
-    create_button(hwnd, hinst, "Stop", 170, ctrl_area_y, 70, 30, ID_BTN_STOP);
-    create_button(hwnd, hinst, "Reset", 250, ctrl_area_y, 70, 30, ID_BTN_RESET);
+    create_button(hwnd, hinst, "Step", 10, ctrl_area_y, 70, 30, ID_BTN_STEP, font);
+    create_button(hwnd, hinst, "Run", 90, ctrl_area_y, 70, 30, ID_BTN_RUN, font);
+    create_button(hwnd, hinst, "Stop", 170, ctrl_area_y, 70, 30, ID_BTN_STOP, font);
+    create_button(hwnd, hinst, "Reset", 250, ctrl_area_y, 70, 30, ID_BTN_RESET, font);
     create_button(
         hwnd,
         hinst,
@@ -889,10 +909,11 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         90,
         30,
         ID_BTN_TOGGLE_BP,
+        font,
     );
 
     // Speed label + trackbar
-    create_static(hwnd, hinst, "Speed (ms):", 460, ctrl_area_y + 5, 80, 20);
+    create_static(hwnd, hinst, "Speed (ms):", 460, ctrl_area_y + 5, 80, 20, font);
 
     tm.h_speed_trackbar = CreateWindowExW(
         WINDOW_EX_STYLE(0),
@@ -920,9 +941,10 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         WPARAM(1),
         LPARAM(tm.timer_speed_ms as isize),
     );
+    send_font(tm.h_speed_trackbar, font);
 
     // State breakpoint input
-    create_static(hwnd, hinst, "State BP:", 760, ctrl_area_y + 5, 70, 20);
+    create_static(hwnd, hinst, "State BP:", 760, ctrl_area_y + 5, 70, 20, font);
     tm.h_state_bp_edit = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         w!("EDIT"),
@@ -937,6 +959,7 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         hinst,
         None,
     );
+    send_font(tm.h_state_bp_edit, font);
     create_button(
         hwnd,
         hinst,
@@ -946,6 +969,7 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         80,
         30,
         ID_BTN_ADD_STATE_BP,
+        font,
     );
 
     // ── Status Bar (y=505..530) ──
@@ -963,6 +987,7 @@ unsafe fn create_controls(hwnd: HWND, hinst: HINSTANCE, tm: &mut TuringMachine) 
         hinst,
         None,
     );
+    send_font(tm.h_status_label, font);
 }
 
 unsafe fn create_static(
@@ -973,9 +998,10 @@ unsafe fn create_static(
     y: i32,
     w: i32,
     h: i32,
+    font: HFONT,
 ) -> HWND {
     let wt = to_wide(text);
-    CreateWindowExW(
+    let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("STATIC"),
         PCWSTR(wt.as_ptr()),
@@ -988,7 +1014,9 @@ unsafe fn create_static(
         None,
         hinst,
         None,
-    )
+    );
+    send_font(hwnd, font);
+    hwnd
 }
 
 unsafe fn create_button(
@@ -1000,9 +1028,10 @@ unsafe fn create_button(
     w: i32,
     h: i32,
     id: i32,
+    font: HFONT,
 ) -> HWND {
     let wt = to_wide(text);
-    CreateWindowExW(
+    let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("BUTTON"),
         PCWSTR(wt.as_ptr()),
@@ -1015,7 +1044,9 @@ unsafe fn create_button(
         HMENU(id as isize),
         hinst,
         None,
-    )
+    );
+    send_font(hwnd, font);
+    hwnd
 }
 
 unsafe fn create_combo(
@@ -1026,8 +1057,9 @@ unsafe fn create_combo(
     w: i32,
     h: i32,
     id: i32,
+    font: HFONT,
 ) -> HWND {
-    CreateWindowExW(
+    let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("COMBOBOX"),
         w!(""),
@@ -1040,7 +1072,9 @@ unsafe fn create_combo(
         HMENU(id as isize),
         hinst,
         None,
-    )
+    );
+    send_font(hwnd, font);
+    hwnd
 }
 
 unsafe fn add_combo_items(hcombo: HWND, items: &[&str]) {
@@ -1098,11 +1132,24 @@ fn main() -> Result<()> {
         // Create TuringMachine on heap
         let mut tm = Box::new(TuringMachine::new());
 
+        // Create Segoe UI font for all controls and paint
+        let mut face_name = [0u16; 32];
+        let segoe = to_wide("Segoe UI");
+        face_name[..segoe.len()].copy_from_slice(&segoe);
+        let lf_ui = LOGFONTW {
+            lfHeight: -14,
+            lfWeight: FW_NORMAL.0 as i32,
+            lfFaceName: face_name,
+            ..Default::default()
+        };
+        tm.ui_font = CreateFontIndirectW(&lf_ui);
+
         // Create bold font for breakpoint rows
         let lf = LOGFONTW {
             lfWeight: FW_BOLD.0 as i32,
             lfItalic: 1,
             lfHeight: -14,
+            lfFaceName: face_name,
             ..Default::default()
         };
         tm.bold_font = CreateFontIndirectW(&lf);
